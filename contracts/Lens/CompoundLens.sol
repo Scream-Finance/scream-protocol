@@ -3,27 +3,18 @@ pragma experimental ABIEncoderV2;
 
 import "../CErc20.sol";
 import "../CToken.sol";
-import "../CTokenInterfaces.sol";
 import "../PriceOracle.sol";
 import "../EIP20Interface.sol";
+import "../Governance/GovernorAlpha.sol";
 import "../Governance/Comp.sol";
 
 interface ComptrollerLensInterface {
-    function markets(address) external view returns (bool, uint, bool, uint);
+    function markets(address) external view returns (bool, uint);
     function oracle() external view returns (PriceOracle);
     function getAccountLiquidity(address) external view returns (uint, uint, uint);
     function getAssetsIn(address) external view returns (CToken[] memory);
-    function checkMembership(address account, CToken cToken) external view returns (bool);
     function claimComp(address) external;
     function compAccrued(address) external view returns (uint);
-}
-
-interface CSLPInterface {
-    function claimSushi(address) external returns (uint);
-}
-
-interface CCTokenInterface {
-    function claimComp(address) external returns (uint);
 }
 
 contract CompoundLens {
@@ -37,37 +28,27 @@ contract CompoundLens {
         uint totalReserves;
         uint totalSupply;
         uint totalCash;
-        uint totalCollateralTokens;
         bool isListed;
         uint collateralFactorMantissa;
         address underlyingAssetAddress;
         uint cTokenDecimals;
         uint underlyingDecimals;
-        uint version;
-        uint collateralCap;
     }
 
     function cTokenMetadata(CToken cToken) public returns (CTokenMetadata memory) {
         uint exchangeRateCurrent = cToken.exchangeRateCurrent();
         ComptrollerLensInterface comptroller = ComptrollerLensInterface(address(cToken.comptroller()));
-        (bool isListed, uint collateralFactorMantissa, , uint version) = comptroller.markets(address(cToken));
+        (bool isListed, uint collateralFactorMantissa) = comptroller.markets(address(cToken));
         address underlyingAssetAddress;
         uint underlyingDecimals;
-        uint collateralCap;
-        uint totalCollateralTokens;
 
-        if (compareStrings(cToken.symbol(), "crETH")) {
+        if (compareStrings(cToken.symbol(), "cETH")) {
             underlyingAssetAddress = address(0);
             underlyingDecimals = 18;
         } else {
             CErc20 cErc20 = CErc20(address(cToken));
             underlyingAssetAddress = cErc20.underlying();
             underlyingDecimals = EIP20Interface(cErc20.underlying()).decimals();
-        }
-
-        if (version == 1) {
-            collateralCap = CCollateralCapErc20Interface(address(cToken)).collateralCap();
-            totalCollateralTokens = CCollateralCapErc20Interface(address(cToken)).totalCollateralTokens();
         }
 
         return CTokenMetadata({
@@ -80,14 +61,11 @@ contract CompoundLens {
             totalReserves: cToken.totalReserves(),
             totalSupply: cToken.totalSupply(),
             totalCash: cToken.getCash(),
-            totalCollateralTokens: totalCollateralTokens,
             isListed: isListed,
             collateralFactorMantissa: collateralFactorMantissa,
             underlyingAssetAddress: underlyingAssetAddress,
             cTokenDecimals: cToken.decimals(),
-            underlyingDecimals: underlyingDecimals,
-            version: version,
-            collateralCap: collateralCap
+            underlyingDecimals: underlyingDecimals
         });
     }
 
@@ -107,19 +85,16 @@ contract CompoundLens {
         uint balanceOfUnderlying;
         uint tokenBalance;
         uint tokenAllowance;
-        uint collateralBalance;
     }
 
     function cTokenBalances(CToken cToken, address payable account) public returns (CTokenBalances memory) {
         uint balanceOf = cToken.balanceOf(account);
         uint borrowBalanceCurrent = cToken.borrowBalanceCurrent(account);
         uint balanceOfUnderlying = cToken.balanceOfUnderlying(account);
-        address comptroller = address(cToken.comptroller());
         uint tokenBalance;
         uint tokenAllowance;
-        uint collateralBalance;
 
-        if (compareStrings(cToken.symbol(), "crETH")) {
+        if (compareStrings(cToken.symbol(), "cETH")) {
             tokenBalance = account.balance;
             tokenAllowance = account.balance;
         } else {
@@ -129,18 +104,13 @@ contract CompoundLens {
             tokenAllowance = underlying.allowance(account, address(cToken));
         }
 
-        if (ComptrollerLensInterface(comptroller).checkMembership(account, cToken)) {
-            (, collateralBalance, , ) = cToken.getAccountSnapshot(account);
-        }
-
         return CTokenBalances({
             cToken: address(cToken),
             balanceOf: balanceOf,
             borrowBalanceCurrent: borrowBalanceCurrent,
             balanceOfUnderlying: balanceOfUnderlying,
             tokenBalance: tokenBalance,
-            tokenAllowance: tokenAllowance,
-            collateralBalance: collateralBalance
+            tokenAllowance: tokenAllowance
         });
     }
 
@@ -194,6 +164,96 @@ contract CompoundLens {
         });
     }
 
+    struct GovReceipt {
+        uint proposalId;
+        bool hasVoted;
+        bool support;
+        uint96 votes;
+    }
+
+    function getGovReceipts(GovernorAlpha governor, address voter, uint[] memory proposalIds) public view returns (GovReceipt[] memory) {
+        uint proposalCount = proposalIds.length;
+        GovReceipt[] memory res = new GovReceipt[](proposalCount);
+        for (uint i = 0; i < proposalCount; i++) {
+            GovernorAlpha.Receipt memory receipt = governor.getReceipt(proposalIds[i], voter);
+            res[i] = GovReceipt({
+                proposalId: proposalIds[i],
+                hasVoted: receipt.hasVoted,
+                support: receipt.support,
+                votes: receipt.votes
+            });
+        }
+        return res;
+    }
+
+    struct GovProposal {
+        uint proposalId;
+        address proposer;
+        uint eta;
+        address[] targets;
+        uint[] values;
+        string[] signatures;
+        bytes[] calldatas;
+        uint startBlock;
+        uint endBlock;
+        uint forVotes;
+        uint againstVotes;
+        bool canceled;
+        bool executed;
+    }
+
+    function setProposal(GovProposal memory res, GovernorAlpha governor, uint proposalId) internal view {
+        (
+            ,
+            address proposer,
+            uint eta,
+            uint startBlock,
+            uint endBlock,
+            uint forVotes,
+            uint againstVotes,
+            bool canceled,
+            bool executed
+        ) = governor.proposals(proposalId);
+        res.proposalId = proposalId;
+        res.proposer = proposer;
+        res.eta = eta;
+        res.startBlock = startBlock;
+        res.endBlock = endBlock;
+        res.forVotes = forVotes;
+        res.againstVotes = againstVotes;
+        res.canceled = canceled;
+        res.executed = executed;
+    }
+
+    function getGovProposals(GovernorAlpha governor, uint[] calldata proposalIds) external view returns (GovProposal[] memory) {
+        GovProposal[] memory res = new GovProposal[](proposalIds.length);
+        for (uint i = 0; i < proposalIds.length; i++) {
+            (
+                address[] memory targets,
+                uint[] memory values,
+                string[] memory signatures,
+                bytes[] memory calldatas
+            ) = governor.getActions(proposalIds[i]);
+            res[i] = GovProposal({
+                proposalId: 0,
+                proposer: address(0),
+                eta: 0,
+                targets: targets,
+                values: values,
+                signatures: signatures,
+                calldatas: calldatas,
+                startBlock: 0,
+                endBlock: 0,
+                forVotes: 0,
+                againstVotes: 0,
+                canceled: false,
+                executed: false
+            });
+            setProposal(res[i], governor, proposalIds[i]);
+        }
+        return res;
+    }
+
     struct CompBalanceMetadata {
         uint balance;
         uint votes;
@@ -245,30 +305,6 @@ contract CompoundLens {
             });
         }
         return res;
-    }
-
-    function getClaimableSushiRewards(CSLPInterface[] calldata cTokens, address sushi, address account) external returns (uint[] memory) {
-        uint cTokenCount = cTokens.length;
-        uint[] memory rewards = new uint[](cTokenCount);
-        for (uint i = 0; i < cTokenCount; i++) {
-            uint balanceBefore = EIP20Interface(sushi).balanceOf(account);
-            cTokens[i].claimSushi(account);
-            uint balanceAfter = EIP20Interface(sushi).balanceOf(account);
-            rewards[i] = sub(balanceAfter, balanceBefore, "subtraction underflow");
-        }
-        return rewards;
-    }
-
-    function getClaimableCompRewards(CCTokenInterface[] calldata cTokens, address comp, address account) external returns (uint[] memory) {
-        uint cTokenCount = cTokens.length;
-        uint[] memory rewards = new uint[](cTokenCount);
-        for (uint i = 0; i < cTokenCount; i++) {
-            uint balanceBefore = EIP20Interface(comp).balanceOf(account);
-            cTokens[i].claimComp(account);
-            uint balanceAfter = EIP20Interface(comp).balanceOf(account);
-            rewards[i] = sub(balanceAfter, balanceBefore, "subtraction underflow");
-        }
-        return rewards;
     }
 
     function compareStrings(string memory a, string memory b) internal pure returns (bool) {

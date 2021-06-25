@@ -55,11 +55,6 @@ contract ComptrollerV1Storage is UnitrollerAdminStorage {
 }
 
 contract ComptrollerV2Storage is ComptrollerV1Storage {
-    enum Version {
-        VANILLA,
-        COLLATERALCAP
-    }
-
     struct Market {
         /// @notice Whether or not this market is listed
         bool isListed;
@@ -76,9 +71,6 @@ contract ComptrollerV2Storage is ComptrollerV1Storage {
 
         /// @notice Whether or not this market receives COMP
         bool isComped;
-
-        /// @notice CToken version
-        Version version;
     }
 
     /**
@@ -134,25 +126,4 @@ contract ComptrollerV3Storage is ComptrollerV2Storage {
 
     /// @notice The COMP accrued but not yet transferred to each user
     mapping(address => uint) public compAccrued;
-}
-
-contract ComptrollerV4Storage is ComptrollerV3Storage {
-    // @notice The borrowCapGuardian can set borrowCaps to any number for any market. Lowering the borrow cap could disable borrowing on the given market.
-    address public borrowCapGuardian;
-
-    // @notice Borrow caps enforced by borrowAllowed for each cToken address. Defaults to zero which corresponds to unlimited borrowing.
-    mapping(address => uint) public borrowCaps;
-}
-
-contract ComptrollerV5Storage is ComptrollerV4Storage {
-    // @notice The supplyCapGuardian can set supplyCaps to any number for any market. Lowering the supply cap could disable supplying to the given market.
-    address public supplyCapGuardian;
-
-    // @notice Supply caps enforced by mintAllowed for each cToken address. Defaults to zero which corresponds to unlimited supplying.
-    mapping(address => uint) public supplyCaps;
-}
-
-contract ComptrollerV6Storage is ComptrollerV5Storage {
-    // @notice flashloanGuardianPaused can pause flash loan as a safety mechanism.
-    mapping(address => bool) public flashloanGuardianPaused;
 }
