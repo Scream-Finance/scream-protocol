@@ -1,5 +1,8 @@
 pragma solidity ^0.5.16;
 
+import "./CToken.sol";
+import "./ComptrollerStorage.sol";
+
 contract ComptrollerInterface {
     /// @notice Indicator that this is a Comptroller contract (for inspection)
     bool public constant isComptroller = true;
@@ -69,3 +72,4 @@ contract ComptrollerInterface {
         address cTokenCollateral,
         uint repayAmount) external view returns (uint, uint);
 }
+
