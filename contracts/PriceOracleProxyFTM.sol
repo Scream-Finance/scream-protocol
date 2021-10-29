@@ -60,11 +60,7 @@ interface IStdReference {
 interface IKeep3rV2Oracle {
     function current(address tokenIn, uint amountIn, address tokenOut) external view returns (uint amountOut, uint lastUpdatedAgo);
     function quote(address tokenIn, uint amountIn, address tokenOut, uint points) external view returns (uint amountOut, uint lastUpdatedAgo); 
-}
-
-interface IXToken {
-    function decimals() external view returns (uint8);
-    function getShareValue() external view returns (uint256);
+    function xTokenUnderlying() external view returns (address);
 }
 
 contract PriceOracleProxyFTM is PriceOracle, Exponential {
@@ -79,9 +75,6 @@ contract PriceOracleProxyFTM is PriceOracle, Exponential {
 
     /// @notice Keep3r Oracles
     mapping(address => IKeep3rV2Oracle) public keep3rs;
-
-    /// @notice Keep3r Oracles
-    mapping(address => address) public xTokenUnderlyings;
 
     /// @notice The v1 price oracle, maintain by CREAM
     V1PriceOracleInterface public v1PriceOracle;
@@ -208,18 +201,9 @@ contract PriceOracleProxyFTM is PriceOracle, Exponential {
      */
     function getPriceFromKeep3r(address cTokenAddress) public view returns (uint) {
         IKeep3rV2Oracle keep3r = keep3rs[cTokenAddress];
-        address xTokenUnderlying = xTokenUnderlyings[cTokenAddress]; 
         if (address(keep3r) != address(0)) {
             uint answer;
-            //check if collateral is a xToken
-            if (xTokenUnderlying != address(0)) {
-                IXToken xToken = IXToken(CErc20(cTokenAddress).underlying());
-                (uint tempAnswer, ) = keep3r.quote(xTokenUnderlying, 1, WFTM_ADDRESS, 2);
-                answer = div_(mul_(tempAnswer, uint(xToken.getShareValue())), 10**uint(xToken.decimals()));
-            } else {
-                (answer, ) = keep3r.quote(CErc20(cTokenAddress).underlying(), 1, WFTM_ADDRESS, 2);
-            }
-
+            (answer, ) = keep3r.quote(keep3r.xTokenUnderlying(), 1, WFTM_ADDRESS, 2);
 
             // It's fine for price to be 0. We have three price feeds.
             if (answer == 0) {
@@ -263,7 +247,6 @@ contract PriceOracleProxyFTM is PriceOracle, Exponential {
     event AggregatorUpdated(address cTokenAddress, address source);
     event UnderlyingSymbolUpdated(address cTokenAddress, string symbol);
     event Keep3rUpdated(address cTokenAddress, address keep3r);
-    event xTokenUnderlyingUpdated(address cTokenAddress, address xTokenUnderlying);
 
 
     function _setAdmin(address _admin) external {
@@ -299,14 +282,6 @@ contract PriceOracleProxyFTM is PriceOracle, Exponential {
         for (uint i = 0; i < cTokenAddresses.length; i++) {
             keep3rs[cTokenAddresses[i]] = IKeep3rV2Oracle(sources[i]);
             emit Keep3rUpdated(cTokenAddresses[i], sources[i]);
-        }
-    }
-
-    function _setXToken(address[] calldata cTokenAddresses, address[] calldata sources) external {
-        require(msg.sender == admin, "only the admin may set the keeper oracles");
-        for (uint i = 0; i < cTokenAddresses.length; i++) {
-            xTokenUnderlyings[cTokenAddresses[i]] = sources[i];
-            emit xTokenUnderlyingUpdated(cTokenAddresses[i], sources[i]);
         }
     }
 }
