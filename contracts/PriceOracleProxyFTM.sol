@@ -117,7 +117,6 @@ contract PriceOracleProxyFTM is PriceOracle, Exponential {
 
         uint chainLinkPrice = getPriceFromChainlink(cTokenAddress);
         uint bandPrice = getPriceFromBAND(cTokenAddress);
-        uint keep3rPrice = getPriceFromKeep3r(cTokenAddress);
 
         if (chainLinkPrice != 0 && bandPrice != 0) {
             checkPriceDiff(chainLinkPrice, bandPrice);
@@ -131,6 +130,8 @@ contract PriceOracleProxyFTM is PriceOracle, Exponential {
         if (bandPrice != 0) {
             return bandPrice;
         }
+        
+        uint keep3rPrice = getPriceFromKeep3r(cTokenAddress);
 
         if (keep3rPrice != 0) {
             return keep3rPrice;
