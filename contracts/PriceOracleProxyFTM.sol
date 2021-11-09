@@ -57,6 +57,12 @@ interface IStdReference {
         returns (ReferenceData[] memory);
 }
 
+interface IKeep3rV2Oracle {
+    function current(address tokenIn, uint amountIn, address tokenOut) external view returns (uint amountOut, uint lastUpdatedAgo);
+    function quote(address tokenIn, uint amountIn, address tokenOut, uint points) external view returns (uint amountOut, uint lastUpdatedAgo); 
+    function xTokenUnderlying() external view returns (address);
+}
+
 contract PriceOracleProxyFTM is PriceOracle, Exponential {
     /// @notice Admin address
     address public admin;
@@ -66,6 +72,9 @@ contract PriceOracleProxyFTM is PriceOracle, Exponential {
 
     /// @notice Chainlink Aggregators
     mapping(address => AggregatorV3Interface) public aggregators;
+
+    /// @notice Keep3r Oracles
+    mapping(address => IKeep3rV2Oracle) public keep3rs;
 
     /// @notice The v1 price oracle, maintain by CREAM
     V1PriceOracleInterface public v1PriceOracle;
@@ -79,6 +88,13 @@ contract PriceOracleProxyFTM is PriceOracle, Exponential {
 
     /// @notice Quote symbol we used for BAND reference contract
     string public constant QUOTE_SYMBOL = "USD";
+
+    /// @notice WFTM address
+    address public constant WFTM_ADDRESS = address(0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83);
+
+    /// @notice scWFTM address
+    address public constant SCWFTM_ADDRESS = address(0x5AA53f03197E08C4851CAD8C92c7922DA5857E5d);
+
 
     /**
      * @param admin_ The address of admin to set aggregators
@@ -101,6 +117,7 @@ contract PriceOracleProxyFTM is PriceOracle, Exponential {
 
         uint chainLinkPrice = getPriceFromChainlink(cTokenAddress);
         uint bandPrice = getPriceFromBAND(cTokenAddress);
+
         if (chainLinkPrice != 0 && bandPrice != 0) {
             checkPriceDiff(chainLinkPrice, bandPrice);
 
@@ -112,6 +129,12 @@ contract PriceOracleProxyFTM is PriceOracle, Exponential {
         }
         if (bandPrice != 0) {
             return bandPrice;
+        }
+        
+        uint keep3rPrice = getPriceFromKeep3r(cTokenAddress);
+
+        if (keep3rPrice != 0) {
+            return keep3rPrice;
         }
 
         return getPriceFromV1(cTokenAddress);
@@ -144,7 +167,7 @@ contract PriceOracleProxyFTM is PriceOracle, Exponential {
         if (address(aggregator) != address(0)) {
             ( , int answer, , , ) = aggregator.latestRoundData();
 
-            // It's fine for price to be 0. We have two price feeds.
+            // It's fine for price to be 0. We have three price feeds.
             if (answer == 0) {
                 return 0;
             }
@@ -167,6 +190,32 @@ contract PriceOracleProxyFTM is PriceOracle, Exponential {
             IStdReference.ReferenceData memory data = ref.getReferenceData(string(symbol), QUOTE_SYMBOL);
             // Price from BAND is always 1e18 base.
             return getNormalizedPrice(data.rate, cTokenAddress);
+        }
+        return 0;
+    }
+
+
+    /**
+     * @notice Try to get the underlying price of a cToken from Keep3r.
+     * @param cTokenAddress The token to get the underlying price of
+     * @return The price. Return 0 if the keep3r is not set.
+     */
+    function getPriceFromKeep3r(address cTokenAddress) public view returns (uint) {
+        IKeep3rV2Oracle keep3r = keep3rs[cTokenAddress];
+        if (address(keep3r) != address(0)) {
+            uint answer;
+            (answer, ) = keep3r.quote(keep3r.xTokenUnderlying(), 1, WFTM_ADDRESS, 2);
+
+            // It's fine for price to be 0. We have three price feeds.
+            if (answer == 0) {
+                return 0;
+            }
+            //multiply by wftm price in USD
+            uint wftmPrice = getUnderlyingPrice(CToken(SCWFTM_ADDRESS));
+
+            uint price = mul_(uint(answer), wftmPrice);
+
+            return getNormalizedPrice(price, cTokenAddress);
         }
         return 0;
     }
@@ -198,6 +247,8 @@ contract PriceOracleProxyFTM is PriceOracle, Exponential {
     event MaxPriceDiffUpdated(uint maxDiff);
     event AggregatorUpdated(address cTokenAddress, address source);
     event UnderlyingSymbolUpdated(address cTokenAddress, string symbol);
+    event Keep3rUpdated(address cTokenAddress, address keep3r);
+
 
     function _setAdmin(address _admin) external {
         require(msg.sender == admin, "only the admin may set the new admin");
@@ -224,6 +275,14 @@ contract PriceOracleProxyFTM is PriceOracle, Exponential {
         for (uint i = 0; i < cTokenAddresses.length; i++) {
             underlyingSymbols[cTokenAddresses[i]] = symbols[i];
             emit UnderlyingSymbolUpdated(cTokenAddresses[i], symbols[i]);
+        }
+    }
+
+    function _setKeep3rOracles(address[] calldata cTokenAddresses, address[] calldata sources) external {
+        require(msg.sender == admin, "only the admin may set the keeper oracles");
+        for (uint i = 0; i < cTokenAddresses.length; i++) {
+            keep3rs[cTokenAddresses[i]] = IKeep3rV2Oracle(sources[i]);
+            emit Keep3rUpdated(cTokenAddresses[i], sources[i]);
         }
     }
 }
