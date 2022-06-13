@@ -20,7 +20,7 @@ interface IOracle {
  */
 contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
 
-    address public constant badDebtOracle = 0xcbF779C5E3A28dB3F590De35abc184f9840BB107;
+    address public constant badDebtOracle = 0x30Ac60fcbD79E03d51199BA87111b95C06e1E82F;
 
     /**
      * @notice Initialize the money market
@@ -314,7 +314,7 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
         // don't update borrow balance if we're looking at one of the rekt accounts
         bool isBadDebt = IOracle(badDebtOracle).hasBadDebt(account);
         if (isBadDebt) {
-            return borrowSnapshot.principal;
+            return (MathError.NO_ERROR, borrowSnapshot.principal);
         }
 
         /* Calculate new borrow balance using the interest index:
