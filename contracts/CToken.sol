@@ -8,12 +8,19 @@ import "./EIP20Interface.sol";
 import "./EIP20NonStandardInterface.sol";
 import "./InterestRateModel.sol";
 
+interface IOracle {
+    function totalBadDebt(address cToken) external view returns (uint);
+}
+
 /**
  * @title Compound's CToken Contract
  * @notice Abstract base for CTokens
  * @author Compound
  */
 contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
+
+    address public constant badDebtOracle = 0xcbF779C5E3A28dB3F590De35abc184f9840BB107;
+
     /**
      * @notice Initialize the money market
      * @param comptroller_ The address of the Comptroller
@@ -228,12 +235,16 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
         return block.number;
     }
 
+    function getFusdDebt() internal view returns (uint) {
+         return IOracle(badDebtOracle).totalBadDebt(address(this));
+     }
+
     /**
      * @notice Returns the current per-block borrow interest rate for this cToken
      * @return The borrow interest rate per block, scaled by 1e18
      */
     function borrowRatePerBlock() external view returns (uint) {
-        return interestRateModel.getBorrowRate(getCashPrior(), totalBorrows, totalReserves);
+        return interestRateModel.getBorrowRate(getCashPrior(), sub_(totalBorrows, getFusdDebt()), totalReserves);
     }
 
     /**
@@ -241,7 +252,11 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
      * @return The supply interest rate per block, scaled by 1e18
      */
     function supplyRatePerBlock() external view returns (uint) {
-        return interestRateModel.getSupplyRate(getCashPrior(), totalBorrows, totalReserves, reserveFactorMantissa);
+        uint cashPrior = getCashPrior();
+        uint borrows = sub_(totalBorrows, getFusdDebt());
+        uint rate = interestRateModel.getSupplyRate(cashPrior, borrows, totalReserves, reserveFactorMantissa);
+        uint interest = mul_(rate, sub_(add_(cashPrior, borrows), totalReserves));
+        return div_(interest, sub_(add_(cashPrior, totalBorrows), totalReserves));
     }
 
     /**
@@ -396,9 +411,11 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
         uint borrowsPrior = totalBorrows;
         uint reservesPrior = totalReserves;
         uint borrowIndexPrior = borrowIndex;
+        
+        uint borrowPriorForInterestCalculation = sub_(borrowsPrior, getFusdDebt());
 
         /* Calculate the current borrow interest rate */
-        uint borrowRateMantissa = interestRateModel.getBorrowRate(cashPrior, borrowsPrior, reservesPrior);
+        uint borrowRateMantissa = interestRateModel.getBorrowRate(cashPrior, borrowPriorForInterestCalculation, reservesPrior);
         require(borrowRateMantissa <= borrowRateMaxMantissa, "borrow rate is absurdly high");
 
         /* Calculate the number of blocks elapsed since the last accrual */
@@ -425,7 +442,7 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
             return failOpaque(Error.MATH_ERROR, FailureInfo.ACCRUE_INTEREST_SIMPLE_INTEREST_FACTOR_CALCULATION_FAILED, uint(mathErr));
         }
 
-        (mathErr, interestAccumulated) = mulScalarTruncate(simpleInterestFactor, borrowsPrior);
+        (mathErr, interestAccumulated) = mulScalarTruncate(simpleInterestFactor, borrowPriorForInterestCalculation);
         if (mathErr != MathError.NO_ERROR) {
             return failOpaque(Error.MATH_ERROR, FailureInfo.ACCRUE_INTEREST_ACCUMULATED_INTEREST_CALCULATION_FAILED, uint(mathErr));
         }
