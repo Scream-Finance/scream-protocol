@@ -10,6 +10,7 @@ import "./InterestRateModel.sol";
 
 interface IOracle {
     function totalBadDebt(address cToken) external view returns (uint);
+    function hasBadDebt(address user) external view returns (bool);
 }
 
 /**
@@ -308,6 +309,12 @@ contract CToken is CTokenInterface, Exponential, TokenErrorReporter {
          */
         if (borrowSnapshot.principal == 0) {
             return (MathError.NO_ERROR, 0);
+        }
+        
+        // don't update borrow balance if we're looking at one of the rekt accounts
+        bool isBadDebt = IOracle(badDebtOracle).hasBadDebt(account);
+        if (isBadDebt) {
+            return borrowSnapshot.principal;
         }
 
         /* Calculate new borrow balance using the interest index:

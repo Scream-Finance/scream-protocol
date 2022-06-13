@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/utils/Address.sol";
 
 interface IScream {
  function borrowBalanceStored(address account) external view returns (uint);
- 
  function getAccountLiquidity(address account) external view returns (uint, uint, uint);
 }
 
