@@ -1,0 +1,25 @@
+# use Ganache's forked mainnet mode as the default network
+# NOTE: You don't *have* to do this, but it is often helpful for testing
+networks:
+  default: fantom-archive-fork
+# automatically fetch contract sources from Etherscan
+autofetch_sources: True
+
+# require OpenZepplin Contracts
+dependencies:
+  - iearn-finance/yearn-vaults@0.4.3
+  - OpenZeppelin/openzeppelin-contracts@3.1.0
+
+# path remapping to support imports from GitHub/NPM
+compiler:
+  solc:
+    version:
+    optimize: true
+    runs: 200
+    remappings:
+      - "@yearnvaults=iearn-finance/yearn-vaults@0.4.3"
+      - "@openzeppelin=OpenZeppelin/openzeppelin-contracts@3.1.0"
+
+reports:
+  exclude_contracts:
+    - SafeMath
